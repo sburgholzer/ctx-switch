@@ -48,7 +48,7 @@ export interface ValidationResult {
 
 const BEDROCK_REGION = process.env.BEDROCK_REGION || "us-east-1";
 const BEDROCK_MODEL_ID =
-  process.env.BEDROCK_MODEL_ID || "anthropic.claude-3-haiku-20240307-v1:0";
+  process.env.BEDROCK_MODEL_ID || "anthropic.claude-sonnet-4-6";
 
 /** Configured Bedrock Runtime client. */
 export const bedrockClient = new BedrockRuntimeClient({

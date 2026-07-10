@@ -23,7 +23,7 @@ const BEDROCK_TIMEOUT_MS = 15_000;
 
 /** Bedrock model ID — defaults to Claude via environment variable. */
 const BEDROCK_MODEL_ID =
-  process.env.BEDROCK_MODEL_ID || "anthropic.claude-3-haiku-20240307-v1:0";
+  process.env.BEDROCK_MODEL_ID || "anthropic.claude-sonnet-4-6";
 
 /** AWS region for Bedrock client. */
 const BEDROCK_REGION = process.env.AWS_REGION || "us-east-1";
