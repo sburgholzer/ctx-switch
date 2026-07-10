@@ -1,0 +1,20 @@
+{
+  "name": "@ctx-switch/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ctx": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@ctx-switch/shared": "*",
+    "commander": "^13.1.0"
+  }
+}

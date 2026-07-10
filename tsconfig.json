@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "module": "ESNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "outDir": "./dist",
+    "rootDir": "."
+  },
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/lambdas" },
+    { "path": "packages/cli" },
+    { "path": "packages/web" }
+  ],
+  "exclude": ["node_modules", "dist"]
+}

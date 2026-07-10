@@ -1,0 +1,21 @@
+{
+  "name": "@ctx-switch/infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.200.0",
+    "constructs": "^10.4.2",
+    "@ctx-switch/lambdas": "*"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.200.0",
+    "typescript": "^5.7.0"
+  }
+}
