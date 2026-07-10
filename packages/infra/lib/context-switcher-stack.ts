@@ -1,12 +1,8 @@
 /**
  * CDK stack for the Context Switcher infrastructure.
  *
- * Defines all AWS resources:
- * - DynamoDB table with PK/SK schema and GSI-1
- * - S3 bucket with 90-day lifecycle policy
- * - API Gateway REST API with API key authorizer
- * - Lambda functions for all handlers with IAM roles
- * - EventBridge rule for auto-capture scheduling
+ * Uses NodejsFunction for automatic esbuild bundling of Lambda handlers,
+ * resolving workspace dependencies (@ctx-switch/shared) at build time.
  *
  * Requirements: 5.1, 5.2, 7.2
  */
@@ -14,11 +10,12 @@
 import * as cdk from "aws-cdk-lib";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
-import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
 import * as iam from "aws-cdk-lib/aws-iam";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { Runtime } from "aws-cdk-lib/aws-lambda";
 import type { Construct } from "constructs";
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -26,37 +23,31 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/** Path to the compiled Lambda handlers. */
-const LAMBDAS_DIST_PATH = path.resolve(__dirname, "../../lambdas/dist");
+/** Path to the Lambda handler source files. */
+const LAMBDAS_SRC_PATH = path.resolve(__dirname, "../../lambdas/src");
 
 export class ContextSwitcherStack extends cdk.Stack {
-  /** The DynamoDB context store table. */
   public readonly contextTable: dynamodb.Table;
-
-  /** The S3 snapshot archive bucket. */
   public readonly archiveBucket: s3.Bucket;
-
-  /** The API Gateway REST API. */
   public readonly api: apigateway.RestApi;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
     // ──────────────────────────────────────────────
-    // DynamoDB Table: ctx-switch-context-store
+    // DynamoDB Table
     // ──────────────────────────────────────────────
     this.contextTable = new dynamodb.Table(this, "ContextStore", {
       tableName: "ctx-switch-context-store",
       partitionKey: { name: "PK", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "SK", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
     });
 
-    // GSI-1 for auto-capture project lookups
     this.contextTable.addGlobalSecondaryIndex({
       indexName: "GSI1",
       partitionKey: { name: "GSI1PK", type: dynamodb.AttributeType.STRING },
@@ -65,13 +56,13 @@ export class ContextSwitcherStack extends cdk.Stack {
     });
 
     // ──────────────────────────────────────────────
-    // S3 Bucket: ctx-switch-snapshot-archive
+    // S3 Bucket
     // ──────────────────────────────────────────────
     this.archiveBucket = new s3.Bucket(this, "SnapshotArchive", {
-      bucketName: `ctx-switch-snapshot-archive-${cdk.Aws.ACCOUNT_ID}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
       lifecycleRules: [
         {
           id: "expire-old-snapshots",
@@ -82,59 +73,63 @@ export class ContextSwitcherStack extends cdk.Stack {
     });
 
     // ──────────────────────────────────────────────
-    // Lambda Execution Role (shared base permissions)
+    // Shared Lambda environment
     // ──────────────────────────────────────────────
     const lambdaEnvironment: Record<string, string> = {
       TABLE_NAME: this.contextTable.tableName,
       BUCKET_NAME: this.archiveBucket.bucketName,
       GSI1_INDEX_NAME: "GSI1",
-      NODE_OPTIONS: "--enable-source-maps",
+    };
+
+    // Shared bundling options for NodejsFunction
+    const bundlingDefaults = {
+      format: "esm" as const,
+      mainFields: ["module", "main"],
+      sourceMap: true,
+      minify: true,
     };
 
     // ──────────────────────────────────────────────
-    // Lambda Functions
+    // Lambda Functions (bundled with esbuild)
     // ──────────────────────────────────────────────
 
-    // Authorizer Lambda
-    const authorizerFn = new lambda.Function(this, "AuthorizerFunction", {
+    const authorizerFn = new NodejsFunction(this, "AuthorizerFunction", {
       functionName: "ctx-switch-authorizer",
-      runtime: lambda.Runtime.NODEJS_22_X,
-      handler: "handlers/authorizer.handler",
-      code: lambda.Code.fromAsset(LAMBDAS_DIST_PATH),
-      environment: {
-        TABLE_NAME: this.contextTable.tableName,
-      },
+      runtime: Runtime.NODEJS_22_X,
+      entry: path.join(LAMBDAS_SRC_PATH, "handlers/authorizer.ts"),
+      handler: "handler",
+      environment: { TABLE_NAME: this.contextTable.tableName },
       timeout: cdk.Duration.seconds(10),
       memorySize: 256,
+      bundling: bundlingDefaults,
     });
     this.contextTable.grantReadData(authorizerFn);
 
-    // Capture Lambda
-    const captureFn = new lambda.Function(this, "CaptureFunction", {
+    const captureFn = new NodejsFunction(this, "CaptureFunction", {
       functionName: "ctx-switch-capture",
-      runtime: lambda.Runtime.NODEJS_22_X,
-      handler: "handlers/capture.handler",
-      code: lambda.Code.fromAsset(LAMBDAS_DIST_PATH),
+      runtime: Runtime.NODEJS_22_X,
+      entry: path.join(LAMBDAS_SRC_PATH, "handlers/capture.ts"),
+      handler: "handler",
       environment: lambdaEnvironment,
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
+      bundling: bundlingDefaults,
     });
     this.contextTable.grantReadWriteData(captureFn);
     this.archiveBucket.grantReadWrite(captureFn);
 
-    // Resume Lambda
-    const resumeFn = new lambda.Function(this, "ResumeFunction", {
+    const resumeFn = new NodejsFunction(this, "ResumeFunction", {
       functionName: "ctx-switch-resume",
-      runtime: lambda.Runtime.NODEJS_22_X,
-      handler: "handlers/resume.handler",
-      code: lambda.Code.fromAsset(LAMBDAS_DIST_PATH),
+      runtime: Runtime.NODEJS_22_X,
+      entry: path.join(LAMBDAS_SRC_PATH, "handlers/resume.ts"),
+      handler: "handler",
       environment: lambdaEnvironment,
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
+      bundling: bundlingDefaults,
     });
     this.contextTable.grantReadData(resumeFn);
     this.archiveBucket.grantRead(resumeFn);
-    // Bedrock access for briefing generation
     resumeFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["bedrock:InvokeModel"],
@@ -142,53 +137,53 @@ export class ContextSwitcherStack extends cdk.Stack {
       })
     );
 
-    // List Lambda
-    const listFn = new lambda.Function(this, "ListFunction", {
+    const listFn = new NodejsFunction(this, "ListFunction", {
       functionName: "ctx-switch-list",
-      runtime: lambda.Runtime.NODEJS_22_X,
-      handler: "handlers/list.handler",
-      code: lambda.Code.fromAsset(LAMBDAS_DIST_PATH),
+      runtime: Runtime.NODEJS_22_X,
+      entry: path.join(LAMBDAS_SRC_PATH, "handlers/list.ts"),
+      handler: "handler",
       environment: lambdaEnvironment,
       timeout: cdk.Duration.seconds(10),
       memorySize: 256,
+      bundling: bundlingDefaults,
     });
     this.contextTable.grantReadData(listFn);
 
-    // Delete Lambda
-    const deleteFn = new lambda.Function(this, "DeleteFunction", {
+    const deleteFn = new NodejsFunction(this, "DeleteFunction", {
       functionName: "ctx-switch-delete",
-      runtime: lambda.Runtime.NODEJS_22_X,
-      handler: "handlers/delete.handler",
-      code: lambda.Code.fromAsset(LAMBDAS_DIST_PATH),
+      runtime: Runtime.NODEJS_22_X,
+      entry: path.join(LAMBDAS_SRC_PATH, "handlers/delete.ts"),
+      handler: "handler",
       environment: lambdaEnvironment,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
+      bundling: bundlingDefaults,
     });
     this.contextTable.grantReadWriteData(deleteFn);
     this.archiveBucket.grantDelete(deleteFn);
     this.archiveBucket.grantRead(deleteFn);
 
-    // History Lambda
-    const historyFn = new lambda.Function(this, "HistoryFunction", {
+    const historyFn = new NodejsFunction(this, "HistoryFunction", {
       functionName: "ctx-switch-history",
-      runtime: lambda.Runtime.NODEJS_22_X,
-      handler: "handlers/history.handler",
-      code: lambda.Code.fromAsset(LAMBDAS_DIST_PATH),
+      runtime: Runtime.NODEJS_22_X,
+      entry: path.join(LAMBDAS_SRC_PATH, "handlers/history.ts"),
+      handler: "handler",
       environment: lambdaEnvironment,
       timeout: cdk.Duration.seconds(10),
       memorySize: 256,
+      bundling: bundlingDefaults,
     });
     this.contextTable.grantReadData(historyFn);
 
-    // Auto-Capture Lambda
-    const autoCaptureFn = new lambda.Function(this, "AutoCaptureFunction", {
+    const autoCaptureFn = new NodejsFunction(this, "AutoCaptureFunction", {
       functionName: "ctx-switch-auto-capture",
-      runtime: lambda.Runtime.NODEJS_22_X,
-      handler: "handlers/auto-capture.handler",
-      code: lambda.Code.fromAsset(LAMBDAS_DIST_PATH),
+      runtime: Runtime.NODEJS_22_X,
+      entry: path.join(LAMBDAS_SRC_PATH, "handlers/auto-capture.ts"),
+      handler: "handler",
       environment: lambdaEnvironment,
       timeout: cdk.Duration.seconds(60),
       memorySize: 512,
+      bundling: bundlingDefaults,
     });
     this.contextTable.grantReadWriteData(autoCaptureFn);
     this.archiveBucket.grantReadWrite(autoCaptureFn);
@@ -211,20 +206,18 @@ export class ContextSwitcherStack extends cdk.Stack {
       },
     });
 
-    // Custom Lambda authorizer (TOKEN type using x-api-key header)
-    const authorizer = new apigateway.TokenAuthorizer(this, "ApiKeyAuthorizer", {
+    const authorizer = new apigateway.RequestAuthorizer(this, "ApiKeyAuthorizer", {
       handler: authorizerFn,
-      identitySource: "method.request.header.x-api-key",
-      resultsCacheTtl: cdk.Duration.minutes(5),
+      identitySources: [apigateway.IdentitySource.header("x-api-key")],
+      resultsCacheTtl: cdk.Duration.seconds(0),
     });
 
-    // Method options for authorized endpoints
     const authorizedMethodOptions: apigateway.MethodOptions = {
       authorizer,
       authorizationType: apigateway.AuthorizationType.CUSTOM,
     };
 
-    // POST /snapshots -> Capture Lambda
+    // POST /snapshots
     const snapshotsResource = this.api.root.addResource("snapshots");
     snapshotsResource.addMethod(
       "POST",
@@ -232,7 +225,7 @@ export class ContextSwitcherStack extends cdk.Stack {
       authorizedMethodOptions
     );
 
-    // GET /snapshots/{project}/latest -> Resume Lambda
+    // GET /snapshots/{project}/latest
     const snapshotProjectResource = snapshotsResource.addResource("{project}");
     const latestResource = snapshotProjectResource.addResource("latest");
     latestResource.addMethod(
@@ -241,7 +234,7 @@ export class ContextSwitcherStack extends cdk.Stack {
       authorizedMethodOptions
     );
 
-    // GET /snapshots/{project}/history -> History Lambda
+    // GET /snapshots/{project}/history
     const historyResource = snapshotProjectResource.addResource("history");
     historyResource.addMethod(
       "GET",
@@ -249,7 +242,7 @@ export class ContextSwitcherStack extends cdk.Stack {
       authorizedMethodOptions
     );
 
-    // GET /projects -> List Lambda
+    // GET /projects
     const projectsResource = this.api.root.addResource("projects");
     projectsResource.addMethod(
       "GET",
@@ -257,7 +250,7 @@ export class ContextSwitcherStack extends cdk.Stack {
       authorizedMethodOptions
     );
 
-    // DELETE /projects/{project} -> Delete Lambda
+    // DELETE /projects/{project}
     const projectResource = projectsResource.addResource("{project}");
     projectResource.addMethod(
       "DELETE",
@@ -266,20 +259,18 @@ export class ContextSwitcherStack extends cdk.Stack {
     );
 
     // ──────────────────────────────────────────────
-    // EventBridge Rule for Auto-Capture Scheduling
+    // EventBridge Rule for Auto-Capture
     // ──────────────────────────────────────────────
     const autoCaptureRule = new events.Rule(this, "AutoCaptureScheduleRule", {
       ruleName: "ctx-switch-auto-capture-schedule",
       description: "Triggers auto-capture Lambda on a configurable schedule",
-      // Default schedule: weekdays at 5 PM UTC (developer can override via configuration)
       schedule: events.Schedule.cron({
         minute: "0",
         hour: "17",
         weekDay: "MON-FRI",
       }),
-      enabled: false, // Disabled by default; enabled per-user via configuration
+      enabled: false,
     });
-
     autoCaptureRule.addTarget(new targets.LambdaFunction(autoCaptureFn));
 
     // ──────────────────────────────────────────────
@@ -288,19 +279,16 @@ export class ContextSwitcherStack extends cdk.Stack {
     new cdk.CfnOutput(this, "ApiEndpoint", {
       value: this.api.url,
       description: "API Gateway endpoint URL",
-      exportName: "ContextSwitcherApiEndpoint",
     });
 
     new cdk.CfnOutput(this, "TableName", {
       value: this.contextTable.tableName,
       description: "DynamoDB table name",
-      exportName: "ContextSwitcherTableName",
     });
 
     new cdk.CfnOutput(this, "BucketName", {
       value: this.archiveBucket.bucketName,
       description: "S3 archive bucket name",
-      exportName: "ContextSwitcherBucketName",
     });
   }
 }

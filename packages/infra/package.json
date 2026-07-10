@@ -10,12 +10,13 @@
     "deploy": "cdk deploy"
   },
   "dependencies": {
+    "@ctx-switch/lambdas": "*",
     "aws-cdk-lib": "^2.200.0",
-    "constructs": "^10.4.2",
-    "@ctx-switch/lambdas": "*"
+    "constructs": "^10.4.2"
   },
   "devDependencies": {
     "aws-cdk": "^2.200.0",
+    "tsx": "^4.23.0",
     "typescript": "^5.7.0"
   }
 }

@@ -20,8 +20,7 @@
   "references": [
     { "path": "packages/shared" },
     { "path": "packages/lambdas" },
-    { "path": "packages/cli" },
-    { "path": "packages/web" }
+    { "path": "packages/cli" }
   ],
   "exclude": ["node_modules", "dist"]
 }
