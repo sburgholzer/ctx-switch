@@ -1,14 +1,17 @@
 /**
  * `ctx resume [project-name]` command implementation.
  *
- * If a project name is provided, retrieves the latest briefing for that project.
- * If no project name is given, displays a sorted list of all available projects.
+ * If no project name is provided and inside a git repo, derives the project ID
+ * from the git remote and fetches the briefing for the current project.
+ * If a project name/ID is provided, fetches the briefing for that project.
+ * If --list flag or not in a git repo, displays all available projects.
  *
  * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7
  */
 
-import { formatProjectRow } from "@ctx-switch/shared";
+import { formatProjectRow, deriveProjectId } from "@ctx-switch/shared";
 import type { ApiClient } from "../api-client.js";
+import { isGitRepo, getRemoteOriginUrl } from "../git.js";
 
 /** Response shape from GET /snapshots/{project}/latest */
 export interface ResumeResponse {
@@ -38,7 +41,7 @@ export interface ResumeCommandDeps {
 /**
  * Executes the resume command logic.
  *
- * @param projectName - Optional project name to resume. If omitted, lists all projects.
+ * @param projectName - Optional project name/ID to resume. If omitted, auto-detects from git or lists projects.
  * @param deps - Injected dependencies (API client and output function).
  */
 export async function resumeCommand(
@@ -50,7 +53,15 @@ export async function resumeCommand(
   if (projectName) {
     await resumeProject(projectName, apiClient, output);
   } else {
-    await listProjects(apiClient, output);
+    // Auto-detect from current git repo
+    if (isGitRepo()) {
+      const remoteUrl = getRemoteOriginUrl();
+      const projectInput = remoteUrl ?? process.cwd();
+      const projectId = deriveProjectId(projectInput);
+      await resumeProject(projectId, apiClient, output);
+    } else {
+      await listProjects(apiClient, output);
+    }
   }
 }
 

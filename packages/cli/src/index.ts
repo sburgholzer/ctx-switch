@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { loadConfig } from "./config.js";
 import { createApiClient } from "./api-client.js";
+import { parkCommand } from "./commands/park.js";
 import { resumeCommand } from "./commands/resume.js";
 import { listCommand } from "./commands/list.js";
 import { deleteCommand } from "./commands/delete.js";
@@ -19,9 +20,8 @@ program
   .description("Capture current working context")
   .option("--note <text>", "Attach a free-text note to the snapshot")
   .option("--history", "Include terminal history in the snapshot")
-  .action(async (_options) => {
-    // Implemented in task 11.3
-    console.log("park command not yet implemented");
+  .action(async (options) => {
+    await parkCommand(options);
   });
 
 program

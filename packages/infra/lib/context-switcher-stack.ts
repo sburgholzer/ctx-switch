@@ -209,7 +209,7 @@ export class ContextSwitcherStack extends cdk.Stack {
     const authorizer = new apigateway.RequestAuthorizer(this, "ApiKeyAuthorizer", {
       handler: authorizerFn,
       identitySources: [apigateway.IdentitySource.header("x-api-key")],
-      resultsCacheTtl: cdk.Duration.seconds(0),
+      resultsCacheTtl: cdk.Duration.minutes(5),
     });
 
     const authorizedMethodOptions: apigateway.MethodOptions = {
